@@ -1,71 +1,67 @@
 package com.solidcode.apiusers.integration;
 
+import static com.google.common.io.Resources.getResource;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.assertj.core.api.Java6Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT;
 
-import com.solidcode.apiusers.dto.request.UserRequest;
-import com.solidcode.apiusers.repository.UserRepository;
-import com.solidcode.apiusers.repository.entity.User;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.tomakehurst.wiremock.client.WireMock;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
+import com.google.common.io.Resources;
+import com.solidcode.apiusers.adaptor.ZilchClient;
+import com.solidcode.apiusers.adaptor.request.ZilchUserRequest;
+import com.solidcode.apiusers.adaptor.response.ZilchUserResponse;
+import java.io.IOException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.ActiveProfiles;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplier;
+import org.springframework.context.annotation.Bean;
 
-@SpringBootTest(webEnvironment = RANDOM_PORT)
-@ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
+@SpringBootTest({"server.port:0", "eureka.client.enabled:false"})
 class UserControllerTest {
 
-  private static TestRestTemplate restTemplate;
-  private String baseUrl = "http://localhost";
-  private static UserRequest userRequest;
+  private static final String REGISTER_USER_TO_ZILCH_REQUEST = "request/ZilchUserRequest.json";
+  private static final String REGISTER_USER_TO_ZILCH_RESPONSE = "response/ZilchResponse.json";
+
+  private static ObjectMapper mapper = new ObjectMapper();
 
   @Autowired
-  private UserRepository userRepository;
+  private ZilchClient zilchClient;
 
-  @LocalServerPort
-  private int port;
+  @TestConfiguration
+  public static class TestConfig {
 
-  @BeforeAll
-  public static void beforeClass() {
-    restTemplate = new TestRestTemplate();
+    @Bean
+    public ServiceInstanceListSupplier serviceInstanceListSupplier() {
+      return new TestServiceInstanceListSupplier("ZILCH-PAY", 8888);
+    }
   }
 
-  @BeforeEach
-  public void setUp() {
-    userRequest = UserRequest.builder()
-        .name("some name")
-        .email("a@a.com")
-        .cardNumber("1111222233334444")
-        .cvv("123")
-        .expiryDate("1228")
-        .build();
-    baseUrl = baseUrl + ":" + port + "/v1/api/users";
-  }
-
-  @AfterEach
-  public void tearDown() {
-    userRepository.deleteAll();
-  }
+  @RegisterExtension
+  static WireMockExtension ZILCH_PAY = WireMockExtension.newInstance()
+      .options(WireMockConfiguration.wireMockConfig().port(8888))
+      .build();
 
   @Test
-  public void saveUser() {
+  public void testZilchClient() throws IOException {
 
-    User response = restTemplate.postForObject(baseUrl + "/register", userRequest, User.class);
-    User first = userRepository.findAll().stream().findFirst().get();
+    String userRequest = Resources.toString(getResource(REGISTER_USER_TO_ZILCH_REQUEST), UTF_8);
+    String userResponse = Resources.toString(getResource(REGISTER_USER_TO_ZILCH_RESPONSE), UTF_8);
+    ZilchUserRequest userRegisterRequest = mapper.readValue(userRequest, ZilchUserRequest.class);
+    ZilchUserResponse expected = mapper.readValue(userResponse, ZilchUserResponse.class);
 
-    assertEquals(response.getId(), first.getId());
-    assertEquals(response.getName(), first.getName());
-    assertEquals(response.getEmail(), first.getEmail());
-    assertEquals(response.getDebitCardNumber(), first.getDebitCardNumber());
-    assertEquals(response.getDebitCvv(), first.getDebitCvv());
-    assertEquals(response.getDebitExpiry(), first.getDebitExpiry());
-    assertEquals(1, userRepository.findAll().size());
+    ZILCH_PAY.stubFor(WireMock.post("/v1/api/zilch/users/register")
+        .withRequestBody(WireMock.equalToJson(userRequest))
+        .willReturn(WireMock.okJson(userResponse)));
+
+    ZilchUserResponse response = zilchClient.register(userRegisterRequest);
+
+    assertThat(response).isNotNull();
+    assertEquals(expected, response);
   }
 }

@@ -1,3 +1,6 @@
+local:
+  server:
+    port: 8888
 spring:
   h2:
     console:
@@ -24,3 +27,8 @@ spring:
     show-sql: true
   liquibase:
     change-log: classpath:/db/changelog/changelog-master.xml
+
+
+eureka:
+  client:
+    enabled: false

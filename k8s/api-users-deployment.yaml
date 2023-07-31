@@ -1,0 +1,44 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: api-users
+spec:
+  selector:
+    app: api-users
+  ports:
+    - protocol: TCP
+      port: 8083
+      targetPort: 8083
+  type: NodePort
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-users
+spec:
+  selector:
+    matchLabels:
+      app: api-users
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: api-users
+    spec:
+      containers:
+        - name: api-users
+          image: api-users:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8083
+          env:
+          - name: DATASOURCE_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: db-secret
+                key: username
+          - name: DATASOURCE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: db-secret
+                key: password
